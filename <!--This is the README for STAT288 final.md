@@ -2,6 +2,8 @@
 
 # The problem of class imbalance in predictive modeling as revealed by the 2018 Behavioral Risk Factor Surveillance System data for asthma in adults
 
+*NOTE - I completed this final project for STAT 288 Statistical Learning with my classmate Amir Barghi*
+
 ## Introduction
 
 We were interested in predicting asthma in adults based on demographic descriptors as well as variables associated with substance use and other chronic health conditions using the 2018 Behavioral Risk Factor Surveillance System (BRFSS) dataset. We wanted to determine whether a diagnosis of asthma in respondents depended on whether the respondent lived in an urban or rural area.  We also wanted to determine if tobacco use, alcohol use, or other demographic factors were associated with a diagnosis of  asthma.  Lastly, we sought to determine if other chronic health conditions in the respondent were associated with a diagnosis of asthma. We restricted our analyses to data from Illinois, Michigan, and Ohio, because these states are located within the same region of the country, consist of large metropolitan as well as rural areas, and might be more representative of the country as a whole than other states. Only predictors whose associated questions were asked in all three states were included in our study. The complete list of predictors used in our analyses is given in Table 1.
