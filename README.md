@@ -113,7 +113,7 @@ The only predictors that overlapped between classification trees and logistic re
 
 <img src="images/asthma3importance.png">
 
-<img src="images/asthnowimportance.png">
+<img src="images/asthnowImportance.png">
 
 To minimize the variance of the estimates produced by classification trees, we employed bagging (bootstrap aggregation). Test error estimates of our bagged models were not considerably different from test errors for individual trees (Table 6). 
 
