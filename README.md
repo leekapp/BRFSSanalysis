@@ -9,6 +9,7 @@
 We were interested in predicting asthma in adults based on demographic descriptors as well as variables associated with substance use and other chronic health conditions using the 2018 Behavioral Risk Factor Surveillance System (BRFSS) dataset. We wanted to determine whether a diagnosis of asthma in respondents depended on whether the respondent lived in an urban or rural area.  We also wanted to determine if tobacco use, alcohol use, or other demographic factors were associated with a diagnosis of  asthma.  Lastly, we sought to determine if other chronic health conditions in the respondent were associated with a diagnosis of asthma. We restricted our analyses to data from Illinois, Michigan, and Ohio, because these states are located within the same region of the country, consist of large metropolitan as well as rural areas, and might be more representative of the country as a whole than other states. Only predictors whose associated questions were asked in all three states were included in our study. The complete list of predictors used in our analyses is given in Table 1.
 
 ### Table 1. Predictors Initially Considered in our Analyses
+
 The response variables in our analyses are italicized
 | |coded variable | explanation |
 |----------------|--------------------|-------------------------|
@@ -66,11 +67,11 @@ Decisions about which predictors on which to base the analysis of adult asthma w
 
 | response | associated predictor |
 |------------------|----------------------|
-| **asthma3**      |   
+| **asthma3**      |
 |  *demographics*    |sex1, _state, _race, educa, employ1, income2, _age65yr/_age5yr||
 | *chronic conditions* | cvdcrhd4, cvdstrk3, chkdny1, asthnow, casthdx2, casthno2, chccopd1, havarth3, addepev2 |
 | *susbtance use*  | smoke100, smokday2, lastsmk2, ecigaret, alcday5, marijan1, rsnmrjn1|
-| *general health* | exerany2, sleptim1, genhlth, physhlth, menthlth, poorhlth, lastden4, rmvteth4 | 
+| *general health* | exerany2, sleptim1, genhlth, physhlth, menthlth, poorhlth, lastden4, rmvteth4 |
 | **asthnow**      |                  |
 |  *demographics*    |sex1, xstate, xmetstat, educa, employ1, income2, _age65yr/_ageg5yr|
 | *chronic conditions* | asthma3, asthnow, casthno2, casthdx2, chccopd1, havarth3 |
@@ -80,14 +81,15 @@ Decisions about which predictors on which to base the analysis of adult asthma w
 We divided the data into training and test sets of equal size and began to fit models predicting the response for asthma3 using variables from each representative category shown in Table 1. We then obtained reduced models by eliminating the predictors whose coefficients were not significant (p-value > 0.05). Typically this resulted in lower test error estimates (Table 3) but a less favorable AIC, suggesting that reduced models were more poorly describing the variability in asthma3 responses. 
 
 ### Table 3. Logistic Regression Test Error Estimates
+
 |Predictor category| AIC |Test error| Variables in the model|
 |------------------|-----|----------|-----------------------|
-| **Response: asthma3**|   |   |                    |      
+| **Response: asthma3**|   |   |                    |       |
 | chronic conditions | 681.59 |     0.1811     | full model  |
 | chronic conditions reduced| 2366.2| 0.1519| havarth3, addepev2, cvdcrhd4, chccopd1, casthdx2, casthno2 |   
 | demographics      | 3122.6 |     0.1435     | full model |
 | demographics reduced | 10585 | 0.1433 | _race, employ1, _age5yr|
-| **Response: asthnow**|   |   |                    |
+| **Response: asthnow**|   |   |                    |        |
 | chronic conditions | 548.94 | 0.1386 | full model |
 | chronic conditions reduced| 8159.5| 0.1025| chccopd1, casthno2|
 | demographics | 2559.1 | 0.1024| full model |
@@ -98,6 +100,7 @@ The best test error estimates we could achieve amounted to having null models th
 We bypassed LDA and QDA , given that they rely on a maximum likelihood procedure similar to logistic regression, and instead asked whether classification trees would yield predictions using different predictors or with better accuracy. Classification trees produced marginally higher test error estimates than those of logistic regression models (Table 4). 
 
 ### Table 4. Classification Tree Test Error Estimates
+
 | Response variable | Test error | Variables in tree|
 |-------------------|------------|------------------|
 | asthma3 | 0.1650 | physhlth, menthlth, havarth3, income2,  educa, rmvteth4, mscode, employ1, xageg5yr |
@@ -118,6 +121,7 @@ The only predictors that overlapped between classification trees and logistic re
 To minimize the variance of the estimates produced by classification trees, we employed bagging (bootstrap aggregation). Test error estimates of our bagged models were not considerably different from test errors for individual trees (Table 6). 
 
 ### Table 6. Bagging, Boosting, and Random Forest Test Errors
+
 | Response variable | OOB error| Test error| Response variable| Best test error|
 |---------|---------|----------|----------|-----------|
 |**Bagging**| | | |
