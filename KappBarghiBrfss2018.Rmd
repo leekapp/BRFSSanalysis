@@ -1,0 +1,1169 @@
+---
+title: "BRFSS"
+author: "Lee Kapp"
+date: "4/24/2020"
+output:
+   html_document: default
+   pdf_document: default
+   word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Loading Libraries
+```{r}
+library(MASS)
+library(tidyverse)
+library(GGally)
+library(ResourceSelection)
+library(broom)
+
+library(boot)
+library(tree)
+library(randomForest)
+library(gbm)
+
+# setting random number generator for consistency with Richard's R
+RNGversion('3.5.3')
+```
+
+# Import of entire 2018 BRFSS
+```{r}
+brfss = readRDS("/Users/leekapp/Documents/Portfolio/STAT288Final/data/brfss2018.rds")
+```
+
+# Casting to dataframe and selecting IL, OH, and MI
+```{r}
+df <- data.frame(brfss)
+
+IMO <- df %>% #Filtering for Ilinois, Michigan and Ohio
+  filter(xstate %in% c(17, 26, 39))
+```
+
+# Generating a list of column names
+```{r}
+LIST <- NULL
+
+for (i in 1:ncol(IMO)){
+  if (all(is.na(IMO[[i]])) == TRUE){
+  LIST <- c(LIST, names(IMO)[i])
+  }
+}
+
+LIST
+```
+
+# Our subset of predictors
+```{r}
+IMO <- IMO %>%
+  select(sex1, xstate, xrace, xmetstat, mscode, xurbstat, educa, employ1, income2,
+         exerany2, sleptim1, genhlth, physhlth, menthlth, poorhlth, lastden4, rmvteth4,
+         cvdinfr4, cvdcrhd4, cvdstrk3, asthma3, asthnow, casthno2,
+         casthdx2, chccopd1, havarth3, addepev2, chckdny1, xage65yr, xageg5yr)
+```
+
+# Simplifying levels and re-labeling categories
+```{r}
+IMO <- IMO %>% mutate_at(vars(xstate), list( ~ case_when(. == 17 ~ "IL", . == 26 ~ "MI", . == 39 ~ "OH")))
+
+IMO <- IMO %>% mutate_at(vars(exerany2, cvdinfr4, cvdcrhd4, cvdstrk3, asthma3, asthnow, chccopd1, havarth3, addepev2, chckdny1, casthdx2, casthno2), list( ~ case_when(. == 1 ~ "Yes", . == 2 ~ "No", . == 7 ~ "NA", . == 9 ~ "NA")))
+
+IMO <- IMO %>% mutate_at(vars(xrace, educa, employ1), list( ~ ifelse(. == 9, NA, .)))
+
+IMO <- IMO %>% mutate_at(vars(sex1, genhlth, exerany2, lastden4, rmvteth4), list( ~ ifelse(. %in% c(7, 9), NA, .)))
+
+IMO <- IMO %>% mutate_at(vars(income2, sleptim1, menthlth, physhlth, poorhlth), list( ~ ifelse(. %in% c(77, 99), NA, .)))
+
+IMO$lastden4 <- case_when(IMO$lastden4 == 1 ~ "w/in past 5 yrs", IMO$lastden4 == 2 ~ "w/in past 5 yrs", IMO$lastden4 == 3 ~ "w/in past 5 yrs", IMO$lastden4 == 4 ~ "> 5yrs ago", IMO$lastden4 == 8 ~ "never")
+
+IMO$employ1 <- case_when(IMO$employ1 == 1 ~ "employed", IMO$employ1 == 2 ~ "employed", IMO$employ1 == 3 ~ "unemployed", IMO$employ1 == 4 ~ "unemployed", IMO$employ1 == 5 ~ "homemaker", IMO$employ1 == 6 ~ "student", IMO$employ1 == 7 ~ "retired", IMO$employ1 == 8 ~ "disabled")
+
+IMO$xrace <- case_when(IMO$xrace == 1 ~ "White/non-Hispanic", IMO$xrace == 2 ~ "Black", IMO$xrace == 3 ~ "Native American", IMO$xrace == 4 ~ "Asian", IMO$xrace == 5 ~ "Hawaiian/Pacific Isl", IMO$xrace == 6 ~ "other", IMO$xrace == 7 ~ "Multiracial", IMO$xrace == 8 ~ "Hispanic")
+
+IMO$rmvteth4 <- case_when(IMO$rmvteth4 == 1 ~ "1 to 5", IMO$rmvteth4 == 2 ~ "> 6, not all", IMO$rmvteth4 == 3 ~ "all", IMO$rmvteth4 == 8 ~ "none")
+
+IMO <- IMO %>% mutate_at(vars(menthlth, physhlth, poorhlth), list( ~ ifelse(. == 88, 0, .)))
+IMO <- IMO %>% mutate_at(vars(rmvteth4), list( ~ ifelse(. == 8, "none", .)))
+
+IMO$genhlth <- case_when(IMO$genhlth == 1 ~ "Good", IMO$genhlth == 2 ~ "Good", IMO$genhlth == 3 ~ "Good", IMO$genhlth == 4 ~ "Fair/Poor", IMO$genhlth == 5 ~ "Fair/Poor")
+
+IMO$income2 <- case_when(IMO$income2 == 1 ~ "< 10k", IMO$income2 == 2 ~ "15 - 35k", IMO$income2 == 3 ~ "15 - 35k", IMO$income2 == 4 ~ "15 - 35k", IMO$income2 == 5 ~ "15 - 35k", IMO$income2 == 6 ~ "35 - 50k", IMO$income2 == 7 ~ "75k or more", IMO$income2 == 8 ~ "75k or more")
+
+IMO$xage65yr <- case_when(IMO$xage65yr == 1 ~ "Non-senior", IMO$xage65yr == 2 ~ "Senior", IMO$xage65yr == 3 ~ "NA")
+
+IMO$xageg5yr <- case_when(IMO$xageg5yr == 1 ~ "18 -- 34", IMO$xageg5yr == 2 ~ "18 -- 34", IMO$xageg5yr == 3 ~ "18 -- 34", IMO$xageg5yr == 4 ~ "35 -- 49", IMO$xageg5yr == 5 ~ "35 -- 49", IMO$xageg5yr == 6 ~ "35 -- 49", IMO$xageg5yr == 7 ~ "50 -- 64", IMO$xageg5yr == 8 ~ "50 -- 64", IMO$xageg5yr == 9 ~ "50 -- 64", IMO$xageg5yr %in% c(10:13) ~ "senior", IMO$xageg5yr == 14 ~ "NA"  )
+
+IMO$sleptim1 <- case_when(IMO$sleptim1 %in% c(1:5) ~ "1 to 5", IMO$sleptim1 %in% c(6:9) ~ "6 to 9", IMO$sleptim1 %in% c(10:24) ~ "> 10")
+
+IMO$menthlth <- case_when(IMO$menthlth %in% c(1:5) ~ "1 to 5", IMO$menthlth %in% c(6:10) ~ "6 to 10", IMO$menthlth %in% c(11:15) ~ "11 to 15", IMO$menthlth %in% c(16:20) ~ "16 to 20", IMO$menthlth %in% c(21:30) ~ "21 to 30")
+
+IMO$physhlth <- case_when(IMO$physhlth %in% c(1:5) ~ "1 to 5", IMO$physhlth %in% c(6:10) ~ "6 to 10", IMO$physhlth %in% c(11:15) ~ "11 to 15", IMO$physhlth %in% c(16:20) ~ "16 to 20", IMO$physhlth %in% c(21:30) ~ "21 to 30")
+
+IMO$poorhlth <- case_when(IMO$poorhlth %in% c(1:5) ~ "1 to 5", IMO$poorhlth %in% c(6:10) ~ "6 to 10", IMO$poorhlth %in% c(11:15) ~ "11 to 15", IMO$poorhlth %in% c(16:20) ~ "16 to 20", IMO$poorhlth %in% c(21:30) ~ "21 to 30")
+
+IMO <- IMO %>% mutate_at(vars(cvdinfr4, cvdcrhd4, cvdstrk3, asthma3, asthnow, chccopd1, havarth3, addepev2, chckdny1, casthdx2, xage65yr, xageg5yr, casthdx2, casthno2), list( ~ ifelse(. == "NA", NA, .)))
+
+IMO <- IMO %>% mutate_at(vars(asthma3, asthnow, casthno2), list( ~ ifelse(is.na(.), "No", .)))
+
+IMO <- IMO %>% mutate_at(vars(xstate, sex1, xrace, mscode, xurbstat, xmetstat, educa, employ1, income2, exerany2, genhlth, lastden4, rmvteth4, cvdinfr4, cvdcrhd4, cvdstrk3, 
+asthma3, asthnow, chccopd1, havarth3, sleptim1, physhlth, poorhlth, menthlth, addepev2, chckdny1, casthdx2, casthno2, xage65yr, xageg5yr), list(factor))
+
+IMO <- IMO %>% mutate_at(vars(xstate, sex1, xrace, mscode, xurbstat, xmetstat, educa, educa, employ1, sleptim1, physhlth, poorhlth, menthlth, income2, exerany2, genhlth, lastden4, rmvteth4, cvdinfr4, cvdcrhd4, cvdstrk3, asthma3, asthnow, chccopd1, havarth3, addepev2, chckdny1, casthdx2, casthno2, xage65yr, xageg5yr), list(droplevels))
+
+glimpse(IMO)
+```
+
+
+# EDA - bar plots of each column
+```{r}
+for (x in IMO %>% select(sex1:xageg5yr) %>% names(.)){
+  x1 <- IMO[,x]
+  print(ggplot(data = IMO, aes(x = x1, fill = xstate)) + geom_bar(na.rm = TRUE) + xlab(x))
+}
+```
+
+# Creating training and test data and synthetic data sets with 50% incidence of asthma == "Yes" or asthnow == "Yes" to examine class imbalance
+```{r}
+set.seed(43)
+
+index <- sample(1:nrow(IMO), nrow(IMO)/2) # randomly selecting rows
+
+train <- IMO[index, ] # has the native incidence of asthma3 == yes
+
+test <- IMO[-index, ] # has the native incidence of asthma3 == yes
+
+# selecting observations with yes or no responses as new dataframes
+asthYes<- IMO %>% 
+  filter(asthma3 == "Yes")
+nowYes<-IMO %>% 
+  filter(asthnow == "Yes")
+asthNo<- IMO %>% 
+  filter(asthma3 == "No" | is.na(asthma3))
+nowNo<- IMO %>% 
+  filter(asthnow == "No" | is.na(asthnow))
+
+synthIndex<-sample(1:nrow(asthNo), nrow(asthYes))
+synthAsthma3<-rbind(asthYes, asthNo[synthIndex,])
+
+synthIndex<-sample(1:nrow(nowNo), nrow(nowYes))
+synthAsthnow<-rbind(nowYes, nowNo[synthIndex,])
+
+set.seed(23)
+
+index <- sample(1:nrow(synthAsthma3), nrow(synthAsthma3)/2)
+
+train3 <- synthAsthma3[index, ] # has the artificial incidence of 50% asthma3 == yes
+
+test3 <- synthAsthma3[-index, ] # has the artificial incidence of 50% asthma3 == yes
+
+set.seed(11)
+
+index <- sample(1:nrow(synthAsthnow), nrow(synthAsthnow)/2)
+
+trainNow <- synthAsthnow[index, ]
+
+testNow <- synthAsthnow[-index, ]
+
+```
+
+# Base line incidence of asthma3 == "No/Yes" and asthnow == "No/Yes" in train and test data sets
+```{r}
+print("asthma3 in initial data frame")
+table(df$asthma3, useNA = "ifany")
+print("asthnow in initial data frame")
+table(df$asthnow, useNA = "ifany")
+print("asthma3: train ") 
+table(train$asthma3, useNA = "ifany")
+print(" ")
+print("asthma3: train3 ")
+table(train3$asthma3, useNA = "ifany")
+print(" ")
+print("asthma3: test ")
+table(test$asthma3, useNA = "ifany")
+print(" ")
+print("asthma3: test3 ") 
+table(test3$asthma3, useNA = "ifany")
+print(" ")
+print("asthnow: train ")
+table(train$asthnow, useNA = "ifany")
+print(" ")
+print("asthnow: trainNow ") 
+table(trainNow$asthnow, useNA = "ifany")
+print(" ")
+print("asthnow: test ")
+table(test$asthnow, useNA = "ifany")
+print(" ")
+print("asthnow: testNow ") 
+table(testNow$asthnow, useNA = "ifany")
+```
+
+# Chi-squared tests - asthma3
+```{r}
+train %>% select(sex1:exerany2, genhlth:cvdstrk3, chccopd1:xageg5yr) %>% map(., ~ chisq.test(table(train$asthma3,.)))
+```
+
+# Chi-squared tests - asthnow
+```{r}
+train %>% select(sex1:exerany2, genhlth:cvdstrk3, chccopd1:xageg5yr) %>% map(., ~ chisq.test(table(train$asthnow,.)))
+```
+
+# Model Fitting
+
+## Logistic Regression
+Fitting asthma3 by each individual predictor and determining test error rates
+```{r}
+# setting min test error df to null
+mintest3 <- NULL
+
+# looping through data and making new dfs to use in fits
+for (x in train %>% select(sex1:xageg5yr, -asthma3) %>% names(.)){
+  x1 <- data.frame(train[, x]) # select training data columm
+  x1 <- cbind(x1, data.frame(train[ , "asthma3"])) # add the asthma3 column to selected predictor train df
+  x2 <- data.frame(test[, x]) # select testing data column
+  x2 <- cbind(x2, data.frame(test[ , "asthma3"])) # add the asthma3 column to selected predictor test df
+  names(x1) <- c(x, "asthma3")
+  names(x2) <- c(x, "asthma3")
+  glm.fit <- glm(data = x1, asthma3 ~ . , family = "binomial") # the fit
+  summary(glm.fit)
+  pred <- predict(glm.fit, newdata = x2, type = "response") # the prediction
+  M <- table(pred, x2$asthma3) # table of predicted by actual
+  m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+  mintest3 <- rbind(mintest3, data.frame(x,m)) # making df of test errors per predictor
+}
+print(mintest3)
+View(mintest3)
+mintest3 %>% arrange(., m) %>% top_n(-29) %>% select(x) %>% unlist() # selecting lowest 29 p-values
+```
+
+# Repeating the above for asthnow
+```{r}
+mintestNow <- NULL
+
+for (x in train %>% select(sex1:xageg5yr, -asthnow) %>% names(.)){
+  x1 <- data.frame(train[, x])
+  x1 <- cbind(x1, data.frame(train[ , "asthnow"]))
+  x2 <- data.frame(test[, x])
+  x2 <- cbind(x2, data.frame(test[ , "asthnow"]))
+  names(x1) <- c(x, "asthnow")
+  names(x2) <- c(x, "asthnow")
+  glm.fit <- glm(data = x1, asthnow ~ . , family = "binomial")
+  pred <- predict(glm.fit, newdata = x2, type = "response")
+  M <- table(pred, x2$asthnow)
+  m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+  mintestNow <- rbind(mintestNow, data.frame(x,m))
+}
+print(mintestNow)
+View(mintestNow)
+mintestNow %>% arrange(., m) %>% top_n(-29) %>% select(x) %>% unlist()
+```
+
+Models fit with data = train (numbered 1) use the native incidence of asthma3/asthnow == yes in IMO.  Models fit with data = train3 or trainNow (numbered 2) use the artificial incidence of asthma3/asthnow == yes of 50%.  Models labeled Red1, Red2 indicate reduced models using only the significant predictors from the full models.
+```{r}
+dis.fit1 <- glm(asthma3~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3  + addepev2 + chckdny1 + chccopd1 + exerany2 + genhlth + rmvteth4 + casthdx2 + sleptim1 + physhlth + menthlth, data = train, family = "binomial")
+
+summary(dis.fit1)
+
+dis.fit2 <- glm(asthma3~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + exerany2 + genhlth + rmvteth4 + casthdx2 + sleptim1 + physhlth + menthlth, data = train3, family = "binomial")
+
+summary(dis.fit2)
+```
+
+
+```{r}
+dis.fitRed1 <- glm(asthma3~havarth3 + addepev2 + cvdcrhd4 + chccopd1 + casthno2 + casthdx2, data = train, family = "binomial")
+
+summary(dis.fitRed1)
+```
+
+```{r}
+dis.fitRed2 <- glm(asthma3~havarth3 + addepev2 + chccopd1 + casthno2, data = train3, family = "binomial")
+
+summary(dis.fitRed2)
+```
+
+```{r}
+dis.now1 <- glm(asthnow~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + casthdx2 + casthno2 + exerany2 + genhlth +lastden4 + rmvteth4 + sleptim1 + physhlth + menthlth, data = train, family = "binomial")
+
+summary(dis.now1)
+
+dis.now2 <- glm(asthnow~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + casthdx2 + casthno2 + exerany2 + genhlth +lastden4 + rmvteth4 + sleptim1 + physhlth + menthlth, data = trainNow, family = "binomial")
+
+summary(dis.now2)
+```
+
+```{r}
+dis.nowRed1 <- glm(asthnow~casthno2 + chccopd1, data = train, family = "binomial")
+
+summary(dis.nowRed1)
+```
+
+```{r}
+dis.nowRed2 <- glm(asthnow~chccopd1 + casthno2 + physhlth, data = trainNow, family = "binomial")
+
+summary(dis.nowRed2)
+```
+
+
+```{r}
+dis.dem1 <- glm(asthma3~sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + exerany2 + xageg5yr, data = train, family = "binomial")
+
+summary(dis.dem1)
+```
+
+```{r}
+
+dis.demRed1 <- glm(asthma3~sex1 + xrace + employ1 + xageg5yr, data = train, family = "binomial")
+
+summary(dis.demRed1)
+```
+
+```{r}
+dis.dem2 <- glm(asthma3~sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + exerany2 + xageg5yr + xage65yr, data = train3, family = "binomial")
+
+summary(dis.dem2)
+```
+
+```{r}
+dis.demRed2 <- glm(asthma3~sex1 + xrace + employ1 + xageg5yr, data = train3, family = "binomial")
+
+summary(dis.demRed2)
+```
+
+```{r}
+now.dem1 <- glm(asthnow~sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + exerany2 + xageg5yr + xage65yr, data = train, family = "binomial")
+
+summary(now.dem1)
+```
+
+```{r}
+now.demRed1 <- glm(asthnow~sex1 + xmetstat + mscode +  employ1, data = train, family = "binomial")
+
+summary(now.demRed1)
+```
+
+```{r}
+now.dem2 <- glm(asthnow~sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + exerany2 + xageg5yr + xage65yr, data = trainNow, family = "binomial")
+
+summary(now.dem2)
+```
+
+```{r}
+now.demRed2 <- glm(asthnow~employ1 + income2, data = trainNow, family = "binomial")
+
+summary(now.demRed2)
+```
+
+### Test error estimates for logistic regression using native testing sets for all models - asthma3
+```{r}
+dis1Probs<-predict(dis.fit1, data = test, type = "response")
+dis1Pred<-rep("No", nrow(test))
+dis1Pred[dis1Probs > 0.5]<-"Yes"
+M <- table(dis1Pred, test$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m
+# correctPred<-mean(dis1Pred == test$asthma3, na.rm = TRUE)
+# correctPred
+# testError<-1-correctPred
+# testError # 0.1567117
+#This model was trained on the native training data set
+```
+
+```{r}
+dis1RedProbs<-predict(dis.fitRed1, data = test, type = "response")
+dis1RedPred<-rep("No", nrow(test))
+dis1RedPred[dis1RedProbs > 0.5]<-"Yes"
+M <- table(dis1RedPred, test$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the full training data set
+```
+
+```{r}
+dis2Probs<-predict(dis.fit2, data = test, type = "response")
+dis2Pred<-rep("No", nrow(test))
+dis2Pred[dis2Probs > 0.5]<-"Yes"
+M <- table(dis2Pred, test$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the synthetic training data set
+```
+
+```{r}
+dis2RedProbs<-predict(dis.fitRed2, data = test, type = "response")
+dis2RedPred<-rep("No", nrow(test))
+dis2RedPred[dis2RedProbs > 0.5]<-"Yes"
+M <- table(dis1RedPred, test$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the synthetic training data set
+```
+
+```{r}
+disDem1Probs<-predict(dis.dem1, data = test, type = "response")
+disDem1Pred<-rep("No", nrow(test))
+disDem1Pred[disDem1Probs > 0.5]<-"Yes"
+M <- table(disDem1Pred, test$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the native training data set
+```
+
+```{r}
+disDem2Probs<-predict(dis.dem2, data = test, type = "response")
+disDem2Pred<-rep("No", nrow(test))
+disDem2Pred[disDem1Probs > 0.5]<-"Yes"
+M <- table(disDem2Pred, test$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the synthetic training data set
+```
+
+```{r}
+disDem1RProbs<-predict(dis.demRed1, data = test, type = "response")
+disDem1RPred<-rep("No", nrow(test))
+disDem1RPred[disDem1RProbs > 0.5]<-"Yes"
+M <- table(disDem1RPred, test$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the native training data set
+```
+
+```{r}
+disDem2RProbs<-predict(dis.demRed2, data = test, type = "response")
+disDem2RPred<-rep("No", nrow(test))
+disDem2RPred[disDem1RProbs > 0.5]<-"Yes"
+M <- table(disDem2RPred, test$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the synthetic training data set
+```
+
+### Test error estimates for logistic regression using native testing sets for all models - asthnow
+```{r}
+now1Probs<-predict(dis.now1, data = test, type = "response")
+now1Pred<-rep("No", nrow(test))
+now1Pred[now1Probs > 0.5]<-"Yes"
+M <- table(now1Pred, test$asthnow)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the native training data set
+```
+
+```{r}
+now2Probs<-predict(dis.now2, data = test, type = "response")
+now2Pred<-rep("No", nrow(test))
+now2Pred[now2Probs > 0.5]<-"Yes"
+M <- table(now2Pred, test$asthnow)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the synthetic training data set
+```
+
+```{r}
+nowRed1Probs<-predict(dis.nowRed1, data = test, type = "response")
+nowRed1Pred<-rep("No", nrow(test))
+nowRed1Pred[nowRed1Probs > 0.5]<-"Yes"
+M <- table(nowRed1Pred, test$asthnow)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the native training data set
+```
+
+```{r}
+nowRed2Probs<-predict(dis.nowRed2, data = test, type = "response")
+nowRed2Pred<-rep("No", nrow(test))
+nowRed2Pred[nowRed1Probs > 0.5]<-"Yes"
+M <- table(nowRed2Pred, test$asthnow)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the synthetic training data set
+table(test$asthnow)
+table(test$asthma3)
+```
+
+```{r}
+nowDem1Probs<-predict(now.dem1, data = test, type = "response")
+nowDem1Pred<-rep("No", nrow(test))
+nowDem1Pred[nowDem1Probs > 0.5]<-"Yes"
+M <- table(nowDem1Pred, test$asthnow)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the native training data set
+```
+
+```{r}
+nowDem1RProbs<-predict(now.demRed1, data = test, type = "response")
+nowDem1RPred<-rep("No", nrow(test))
+nowDem1RPred[nowDem1RProbs > 0.5]<-"Yes"
+m<-mean(nowDem1RPred == test$asthnow, na.rm = TRUE)
+1-m
+# M <- table(nowDem1RPred, test$asthnow)
+# m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+# M
+# m #This model was trained on the native training data set
+```
+
+### Test error estimates for logistic regression using synthetic testing sets for all models - asthma3
+```{r}
+dis1Probs<-predict(dis.fit1, data = test3, type = "response")
+dis1Pred<-rep("No", nrow(test3))
+dis1Pred[dis1Probs > 0.5]<-"Yes"
+M <- table(dis1Pred, test3$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the native training data set
+```
+
+```{r}
+dis1RedProbs<-predict(dis.fitRed1, data = test3, type = "response")
+dis1RedPred<-rep("No", nrow(test3))
+dis1RedPred[dis1RedProbs > 0.5]<-"Yes"
+M <- table(dis1RedPred, test3$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the full training data set
+```
+
+```{r}
+dis2Probs<-predict(dis.fit2, data = test3, type = "response")
+dis2Pred<-rep("No", nrow(test3))
+dis2Pred[dis2Probs > 0.5]<-"Yes"
+M <- table(dis2Pred, test3$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the synthetic training data set
+```
+
+```{r}
+dis2RedProbs<-predict(dis.fitRed2, data = test3, type = "response")
+dis2RedPred<-rep("No", nrow(test3))
+dis2RedPred[dis2RedProbs > 0.5]<-"Yes"
+table(dis2RedPred)
+table(test3$asthma3)
+M <- table(dis2RedPred, test3$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the synthetic training data set
+```
+The demographic models are not working - keep getting the error:  Error in table(disDem1Pred, test3$asthma3) : all arguments must have the same length.  I'm not sure why  - I'm going to compute the error rates using 1 - mean[pred == yes]
+```{r}
+disDem1Probs<-predict(dis.dem1, data = test3, type = "response", na.rm = TRUE) #na.rm = TRUE seems to be useless here
+disDem1Pred<-rep("No", nrow(test3))
+disDem1Pred[disDem1Probs > 0.5]<-"Yes"
+m<-mean(disDem1Pred == test3$asthma3, na.rm = TRUE)
+1-m
+# table(disDem1Pred, useNA = "always")
+# table(test3$asthma3, useNA = "always")
+# M <- table(disDem1Pred, test3$asthma3)
+# m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+# M
+# m #This model was trained on the native training data set
+```
+
+```{r}
+disDem2Probs<-predict(dis.dem2, data = test3, type = "response")
+disDem2Pred<-rep("No", nrow(test3))
+disDem2Pred[disDem2Probs > 0.5]<-"Yes"
+M <- table(disDem2Pred, test3$asthma3)
+# m<-mean(disDem2Pred == test3$asthma3, na.rm = TRUE)
+# 1-m
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the synthetic training data set
+```
+
+```{r}
+disDem1RProbs<-predict(dis.demRed1, data = test3, type = "response")
+disDem1RPred<-rep("No", nrow(test3))
+disDem1RPred[disDem1RProbs > 0.5]<-"Yes"
+m<-mean(disDem1RPred == test3$asthma3, na.rm = TRUE)
+1-m
+# M <- table(disDem1RPred, test3$asthma3)
+# m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+# M
+# m #This model was trained on the native training data set
+```
+
+```{r}
+disDem2RProbs<-predict(dis.demRed2, data = test3, type = "response")
+disDem2RPred<-rep("No", nrow(test3))
+disDem2RPred[disDem2RProbs > 0.5]<-"Yes"
+# m<-mean(disDem2RPred == test3$asthma3, na.rm = TRUE)
+# 1-m
+M <- table(disDem2RPred, test3$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the synthetic training data set
+```
+
+### Test error estimates for logistic regression using synthetic testing sets for all models - asthnow
+```{r}
+now1Probs<-predict(dis.now1, data = testNow, type = "response")
+now1Pred<-rep("No", nrow(testNow))
+now1Pred[now1Probs > 0.5]<-"Yes"
+m<-mean(now1Pred == testNow$asthnow, na.rm = TRUE)
+1-m
+table(now1Pred)
+table(testNow$asthnow)
+table(test3$asthma3)
+# M <- table(now1Pred, testNow$asthnow)
+# m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+# M
+# m #This model was trained on the native training data set
+```
+
+```{r}
+now2Probs<-predict(dis.now2, data = testNow, type = "response")
+table(testNow$asthnow, useNA = "always")
+table(now2Pred, useNA = "always")
+now2Pred<-rep("No", nrow(testNow))
+now2Pred[now2Probs > 0.5]<-"Yes"
+M <- table(now2Pred, testNow$asthnow)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the synthetic training data set
+```
+
+```{r}
+nowRed1Probs<-predict(dis.nowRed1, data = testNow, type = "response")
+nowRed1Pred<-rep("No", nrow(testNow))
+nowRed1Pred[nowRed1Probs > 0.5]<-"Yes"
+m<-mean(now1Pred == testNow$asthnow, na.rm = TRUE)
+1-m
+# M <- table(nowRed1Pred, testNow$asthnow)
+# m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+# M
+# m #This model was trained on the native training data set
+```
+
+```{r}
+nowRed2Probs<-predict(dis.nowRed2, data = testNow, type = "response")
+nowRed2Pred<-rep("No", nrow(testNow))
+nowRed2Pred[nowRed1Probs > 0.5]<-"Yes"
+m<-mean(now1Pred == testNow$asthnow, na.rm = TRUE)
+1-m
+# M <- table(nowRed2Pred, testNow$asthnow)
+# m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+# M
+# m #This model was trained on the synthetic training data set
+table(testNow$asthnow)
+table(testNow$asthma3)
+```
+
+
+### Tree-based models using native data sets: training and testing on native data - asthma3
+```{r}
+set.seed(1)
+
+dis3Tree <- tree(asthma3~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + exerany2 + genhlth +lastden4 + rmvteth4 + casthno2 + casthdx2 + sleptim1 + physhlth + menthlth + sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + xageg5yr + xage65yr, data = train)
+
+summary(dis3Tree)
+
+plot(dis3Tree)
+
+text(dis3Tree, pretty = 1, cex = .45)
+
+pred <- predict(dis3Tree, test, type = "class")
+# m<-mean(pred == test$asthma3, na.rm = TRUE)
+# 1-m
+(M <- table(pred, test$asthma3))
+
+1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+
+dis3Tree
+```
+
+# Pruning via cross-validation
+```{r}
+set.seed(1)
+
+dis3.cv <- cv.tree(dis3Tree, FUN = prune.misclass)
+
+dis3.cv
+
+par(mfrow  = c(1,2))
+
+plot(dis3.cv$size, dis3.cv$dev, type = "b", xlab = "# terminal nodes", ylab = "CV error rate") # dev = the cross-validation error rate
+
+plot(dis3.cv$k, dis3.cv$dev, type = "b", xlab = "cost complexity parameter", ylab = "CV error rate") # k = the cost complexity parameter
+```
+
+# pruning
+```{r}
+set.seed(1)
+
+dis3.prune <- prune.misclass(dis3Tree, best = 5)
+
+plot(dis3.prune)
+
+text(dis3.prune, pretty = 1, cex = 0.6)
+
+summary(dis3.prune)
+
+pred <- predict(dis3.prune, data = test, type = "class")
+m<-mean(pred == test$asthma3, na.rm = TRUE)
+1-m
+# (M <- table(pred, test$asthma3))
+# 
+# 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+dis3.prune
+```
+
+# Using the variables with which the tree was built in a logistic regression
+```{r}
+tree3LR<-glm(asthma3~physhlth + menthlth + havarth3 + educa + genhlth + sex1 + employ1 + income2 + rmvteth4 + xageg5yr + mscode, data = train, family = "binomial")
+summary(tree3LR)
+
+tree3LRProbs<-predict(tree3LR, data = test, type = "response")
+tree3LRPred<-rep("No", nrow(test))
+tree3LRPred[tree3LRProbs > 0.5]<-"Yes"
+M <- table(tree3LRPred, test$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the native training data set
+```
+
+# Reduced model
+```{r}
+tree3LRred<-glm(asthma3~menthlth + havarth3 + rmvteth4 + xageg5yr, data = train, family = "binomial")
+summary(tree3LRred)
+
+tree3LRredProbs<-predict(tree3LRred, data = test, type = "response")
+tree3LRredPred<-rep("No", nrow(test))
+tree3LRredPred[tree3LRredProbs > 0.5]<-"Yes"
+M <- table(tree3LRredPred, test$asthma3)
+m<-mean(pred == test$asthma3, na.rm = TRUE)
+1-m
+# m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+# M
+# m #This model was trained on the native training data set
+```
+
+### Tree-based models using native data sets: training and testing on native data - asthnow
+```{r}
+set.seed(1)
+
+nowTree <- tree(asthnow~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + exerany2 + genhlth +lastden4 + rmvteth4 + casthno2 + casthdx2 + sleptim1 + physhlth + menthlth + sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + xageg5yr + xage65yr, data = train)
+
+summary(nowTree)
+
+plot(nowTree)
+
+text(nowTree, pretty = 1, cex = .45)
+
+pred <- predict(nowTree, test, type = "class")
+
+# m<-mean(pred == test$asthnow, na.rm = TRUE)
+# 1-m
+(M <- table(pred, test$asthnow))
+
+(1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2]))
+nowTree
+```
+
+# cv pruning
+```{r}
+set.seed(1)
+
+now.cv <- cv.tree(nowTree, FUN = prune.misclass)
+
+now.cv
+
+par(mfrow  = c(1,2))
+
+plot(now.cv$size, now.cv$dev, type = "b", xlab = "# terminal nodes", ylab = "CV error rate") # dev = the cross-validation error rate
+
+plot(now.cv$k, now.cv$dev, type = "b", xlab = "cost complexity parameter", ylab = "CV error rate") # k = the cost complexity parameter
+```
+
+# pruning
+```{r}
+set.seed(1)
+
+now.prune <- prune.misclass(nowTree, best = 4)
+
+plot(now.prune)
+
+text(now.prune, pretty = 1, cex = 0.6)
+
+summary(now.prune)
+
+pred <- predict(now.prune, data = test, type = "class")
+
+m<-mean(pred == test$asthnow, na.rm = TRUE)
+1-m
+# (M <- table(pred, test$asthnow))
+# 
+# 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+```
+
+# Using the variables with which the tree was built in a logistic regression
+```{r}
+treeNowLR<-glm(asthnow~employ1 + menthlth + educa + genhlth + income2 + rmvteth4 + mscode + xageg5yr + exerany2, data = train, family = "binomial")  
+summary(treeNowLR)
+
+treeNowLRProbs<-predict(treeNowLR, data = test, type = "response")
+treeNowLRPred<-rep("No", nrow(test))
+treeNowLRPred[treeNowLRProbs > 0.5]<-"Yes"
+M <- table(treeNowLRPred, test$asthma3)
+m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+M
+m #This model was trained on the native training data set - none of the predictors is significant except casthdx2
+```
+
+# Reduced model
+```{r}
+treeNowLRred<-glm(asthnow~employ1 + genhlth + income2, data = train, family = "binomial")
+summary(treeNowLRred)
+
+treeNowLRProbs<-predict(treeNowLRred, data = test, type = "response")
+treeNowLRPred<-rep("No", nrow(test))
+treeNowLRPred[treeNowLRProbs > 0.5]<-"Yes"
+m<-mean(pred == test$asthma3, na.rm = TRUE)
+1-m
+# M <- table(treeNowLRPred, test$asthma3)
+# m <- 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+# M
+# m #This model was trained on the native training data set - none of the predictors is significant except casthdx2
+```
+
+### Tree-based models using synthetic data sets: training and testing on synthetic data - asthma3
+```{r}
+set.seed(1)
+
+dis3Tree <- tree(asthma3~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + exerany2 + genhlth +lastden4 + rmvteth4 + casthno2 + casthdx2 + sleptim1 + physhlth + menthlth + sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + xageg5yr + xage65yr, data = train3)
+
+summary(dis3Tree)
+
+plot(dis3Tree)
+
+text(dis3Tree, pretty = 1, cex = .45)
+
+pred <- predict(dis3Tree, test3, type = "class")
+# m<-mean(pred == test3$asthma3, na.rm = TRUE)
+# 1-m
+(M <- table(pred, test3$asthma3))
+
+1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+```
+
+# cv pruning
+```{r}
+set.seed(1)
+
+dis3.cv <- cv.tree(dis3Tree, FUN = prune.misclass)
+
+dis3.cv
+
+par(mfrow  = c(1,2))
+
+plot(dis3.cv$size, dis3.cv$dev, type = "b", xlab = "# terminal nodes", ylab = "CV error rate") # dev = the cross-validation error rate
+
+plot(dis3.cv$k, dis3.cv$dev, type = "b", xlab = "cost complexity parameter", ylab = "CV error rate") # k = the cost complexity parameter
+```
+
+# pruning
+```{r}
+set.seed(1)
+
+dis3.prune <- prune.misclass(dis3Tree, best = 3)
+
+plot(dis3.prune)
+
+text(dis3.prune, pretty = 1, cex = 0.6)
+
+summary(dis3.prune)
+
+# pred <- predict(dis3.prune, data = test3, type = "class")
+# m<-mean(pred == test3$asthma3, na.rm = TRUE)
+# 1-m
+(M <- table(pred, test3$asthma3))
+
+1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+```
+
+### Tree-based models using synthetic data sets: training and testing on synthetic data - asthnow
+```{r}
+set.seed(1)
+
+nowTree <- tree(asthnow~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + exerany2 + genhlth +lastden4 + rmvteth4 + casthno2 + casthdx2 + sleptim1 + physhlth + menthlth + sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + xageg5yr + xage65yr, data = trainNow)
+
+summary(nowTree)
+
+plot(nowTree)
+
+text(nowTree, pretty = 1, cex = .45)
+
+pred <- predict(nowTree, testNow, type = "class")
+# m<-mean(pred == testNow$asthnow, na.rm = TRUE)
+# 1-m
+(M <- table(pred, testNow$asthnow))
+
+(1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2]))
+```
+
+# cv pruning
+```{r}
+set.seed(1)
+
+now.cv <- cv.tree(nowTree, FUN = prune.misclass)
+
+now.cv
+
+par(mfrow  = c(1,2))
+
+plot(now.cv$size, now.cv$dev, type = "b", xlab = "# terminal nodes", ylab = "CV error rate") # dev = the cross-validation error rate
+
+plot(now.cv$k, now.cv$dev, type = "b", xlab = "cost complexity parameter", ylab = "CV error rate") # k = the cost complexity parameter
+```
+
+# pruning
+```{r}
+set.seed(1)
+
+now.prune <- prune.misclass(nowTree, best = 3)
+
+plot(now.prune)
+
+text(now.prune, pretty = 1, cex = 0.6)
+
+summary(now.prune)
+
+pred <- predict(now.prune, data = testNow, type = "class")
+m<-mean(pred == testNow$asthnow, na.rm = TRUE)
+1-m
+# (M <- table(pred, testNow$asthnow))
+# 
+# 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+```
+
+
+### Tree-based models: training on synthetic data and testing on native data - asthma3
+```{r}
+set.seed(1)
+
+dis3Tree <- tree(asthma3~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + exerany2 + genhlth +lastden4 + rmvteth4 + casthno2 + casthdx2 + sleptim1 + physhlth + menthlth + sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + xageg5yr + xage65yr, data = train3)
+
+summary(dis3Tree)
+
+plot(dis3Tree)
+
+text(dis3Tree, pretty = 1, cex = .45)
+
+pred <- predict(dis3Tree, test, type = "class")
+m<-mean(pred == test$asthma3, na.rm = TRUE)
+1-m
+# (M <- table(pred, testNow$asthnow))
+# 
+# 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+```
+
+
+```{r}
+set.seed(1)
+
+dis3.cv <- cv.tree(dis3Tree, FUN = prune.misclass)
+
+dis3.cv
+
+par(mfrow  = c(1,2))
+
+plot(dis3.cv$size, dis3.cv$dev, type = "b", xlab = "# terminal nodes", ylab = "CV error rate") # dev = the cross-validation error rate
+
+plot(dis3.cv$k, dis3.cv$dev, type = "b", xlab = "cost complexity parameter", ylab = "CV error rate") # k = the cost complexity parameter
+```
+
+
+```{r}
+set.seed(1)
+
+dis3.prune <- prune.misclass(dis3Tree, best = 3)
+
+plot(dis3.prune)
+
+text(dis3.prune, pretty = 1, cex = 0.6)
+
+summary(dis3.prune)
+
+pred <- predict(dis3.prune, data = test, type = "class")
+m<-mean(pred == test$asthma3, na.rm = TRUE)
+1-m
+# (M <- table(pred, test3$asthma3))
+# 
+# 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+```
+
+### Tree-based models: training on synthetic data and testing on native data - asthnow
+```{r}
+set.seed(1)
+
+nowTree <- tree(asthnow~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + exerany2 + genhlth +lastden4 + rmvteth4  + casthno2 + casthdx2 + sleptim1 + physhlth + menthlth + sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + xageg5yr + xage65yr, data = trainNow)
+
+summary(nowTree)
+
+plot(nowTree)
+
+text(nowTree, pretty = 1, cex = .45)
+
+pred <- predict(nowTree, test, type = "class")
+m<-mean(pred == test$asthnow, na.rm = TRUE)
+1-m
+# (M <- table(pred, testNow$asthnow))
+# 
+# (1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2]))
+```
+
+
+```{r}
+set.seed(1)
+
+now.cv <- cv.tree(nowTree, FUN = prune.misclass)
+
+now.cv
+
+par(mfrow  = c(1,2))
+
+plot(now.cv$size, now.cv$dev, type = "b", xlab = "# terminal nodes", ylab = "CV error rate") # dev = the cross-validation error rate
+
+plot(now.cv$k, now.cv$dev, type = "b", xlab = "cost complexity parameter", ylab = "CV error rate") # k = the cost complexity parameter
+```
+
+
+```{r}
+set.seed(1)
+
+now.prune <- prune.misclass(nowTree, best = 2)
+
+plot(now.prune)
+
+text(now.prune, pretty = 1, cex = 0.6)
+
+summary(now.prune)
+
+pred <- predict(now.prune, data = test, type = "class")
+m<-mean(pred == test$asthnow, na.rm = TRUE)
+1-m
+# (M <- table(pred, testNow$asthnow))
+# 
+# 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+```
+
+# Bagging & Random Forests: training and testing on native data - asthma3
+```{r}
+set.seed(1)
+
+asthma3forest <- randomForest(asthma3~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + exerany2 + genhlth + lastden4 + rmvteth4 + casthno2 + casthdx2 + sleptim1 + physhlth + menthlth + sex1 + xrace + mscode + educa + employ1 + income2 + xageg5yr, data = train,  na.action = na.omit, mtry = 23, importance = TRUE) # using all predictors at each split = bagging
+
+asthma3forest
+
+pred <- predict(asthma3forest, data = test, type = "class")
+m<-mean(pred == test$asthma3, na.rm = TRUE)
+1-m
+# (M <- table(pred, test$asthma3))
+# 
+# 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+```
+
+```{r}
+set.seed(13)
+
+asthma3forest <- randomForest(asthma3~addepev2 +lastden4 + rmvteth4 + physhlth + sex1 + xrace + employ1, data = train,  na.action = na.omit, mtry = 3, importance = TRUE) # using 6 predictors at each split = random forest
+
+asthma3forest
+
+pred <- predict(asthma3forest, data = test, type = "class")
+m<-mean(pred == test$asthma3, na.rm = TRUE)
+1-m
+importance(asthma3forest)
+varImpPlot(asthma3forest)
+```
+
+# Bagging & Random Forests: training and testing on native data - asthnow
+```{r}
+set.seed(1)
+
+nowforest <- randomForest(asthnow~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + exerany2 + genhlth + lastden4 + rmvteth4 + casthno2 + casthdx2 + sleptim1 + physhlth + menthlth + sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + xageg5yr + xage65yr, data = train,  na.action = na.omit, mtry = 26, importance = TRUE) # using all predictors at each split = bagging
+
+nowforest
+
+pred <- predict(nowforest, data = test, type = "class")
+m<-mean(pred == test$asthnow, na.rm = TRUE)
+1-m
+```
+
+```{r}
+set.seed(1)
+
+nowforest <- randomForest(asthnow~havarth3 + chccopd1 + genhlth + casthdx2 + xmetstat + employ1 + xageg5yr, data = train,  na.action = na.omit, mtry = 3, importance = TRUE) # using all predictors at each split = bagging
+
+nowforest
+
+pred <- predict(nowforest, data = test, type = "class")
+m<-mean(pred == test$asthnow, na.rm = TRUE)
+1-m
+importance(nowforest)
+varImpPlot(nowforest)
+```
+
+
+# Bagging & Random Forests: training on synthetic data and testing on native data - asthma3
+```{r}
+set.seed(1)
+
+asthma3forest <- randomForest(asthma3~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + exerany2 + genhlth +lastden4 + rmvteth4 + casthno2 + casthdx2 + sleptim1 + physhlth + menthlth + sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + xageg5yr + xage65yr, data = train3,  na.action = na.omit, mtry = 26, importance = TRUE) # using all predictors at each split = bagging
+
+asthma3forest
+
+pred <- predict(asthma3forest, data = test, type = "class")
+m<-mean(pred == test$asthma3, na.rm = TRUE)
+1-m
+# (M <- table(pred, ctest$casthdx2))
+# 
+# 1 - (M[1,1] + M[2,2]) / (M[1,1] + M[1,2] + M[2,1] + M[2,2])
+```
+
+# Random forest with 6 predictors considered per split
+```{r}
+set.seed(1)
+
+asthma3forest <- randomForest(asthma3~genhlth + physhlth + menthlth + employ1 + xageg5yr, data = train3,  na.action = na.omit, mtry = 6, importance = TRUE) # using 6 predictors at each split = random forest
+
+asthma3forest
+
+pred <- predict(asthma3forest, data = test, type = "class")
+m<-mean(pred == test$asthma3, na.rm = TRUE)
+1-m
+importance(asthma3forest)
+varImpPlot(asthma3forest)
+```
+
+# Bagging & Random Forests: training on synthetic data and testing on native data - asthnow
+```{r}
+set.seed(1)
+
+nowforest <- randomForest(asthnow~cvdinfr4 + cvdcrhd4 + cvdstrk3 + havarth3 + addepev2 + chckdny1 + chccopd1 + exerany2 + genhlth +lastden4 + rmvteth4 + casthno2 + casthdx2 + sleptim1 + physhlth + menthlth + sex1 + xrace + xmetstat + mscode + xurbstat + educa + employ1 + income2 + xageg5yr + xage65yr, data = trainNow,  na.action = na.omit, mtry = 26, importance = TRUE) # using all predictors at each split = bagging
+
+nowforest
+
+pred <- predict(nowforest, data = test, type = "class")
+m<-mean(pred == test$asthnow, na.rm = TRUE)
+1-m
+```
+
+# Random forest with 9 predictors considered per split
+```{r}
+set.seed(1)
+
+nowforest <- randomForest(asthnow~addepev2 + chccopd1 + casthno2 + casthdx2 + sleptim1 + employ1, data = trainNow,  na.action = na.omit, mtry = 3, importance = TRUE) # using 6 predictors at each split = random forest
+
+nowforest
+
+pred <- predict(nowforest, data = test, type = "class")
+m<-mean(pred == test$asthnow, na.rm = TRUE)
+1-m
+importance(nowforest)
+varImpPlot(nowforest)
+```
