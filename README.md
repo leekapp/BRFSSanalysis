@@ -11,9 +11,9 @@ We were interested in predicting asthma in adults based on demographic descripto
 ### Table 1. Predictors Initially Considered in our Analyses
 
 The response variables in our analyses are italicized
-| |coded variable | explanation |
+|                |   coded variable   |      explanation        |
 |----------------|--------------------|-------------------------|
-**Demographics** |    | |
+|**Demographics**|                    |                         |
 |                | sex1  | sex |
 |                | _state | state FIPS code |
 |                | _race  | computed race |
@@ -24,7 +24,7 @@ The response variables in our analyses are italicized
 |                | employ1 |employment status |
 |                | income2 |income level
 |                | _age65yr/_age5yr | age |
-**Chronic conditions** |  |  |
+|**Chronic conditions** |  |                |
 |    | cvdinfr4 |diagnosed with heart attack|
 |    | cvdcrhd4 | diagnosed with angina/CAD |
 |    | cvdstrk3 | diagnosed with a stroke   |
@@ -36,8 +36,8 @@ The response variables in our analyses are italicized
 |    | chccopd1 | told have COPD |
 |    | havarth3 | told have arthritis |
 |    | addepev2 | told have a depressive disorder |
-**General health** |  |  |
-|    | exerany2 |   exercise in past 30 days |
+|**General health** |       |                     |
+|    | exerany2 | exercise in past 30 days |
 |    | sleptim1 | how much time sleeping |
 |    | genhlth  | general health status |
 |    | physhlth | number of days with poor physical health |
@@ -45,7 +45,7 @@ The response variables in our analyses are italicized
 |    | poorhlth |poor physical or mental health |
 |    | lastden4 |last visited dentist |
 |    | rmvteth4 | number of permanent teeth removed |
-**Substance use** |  |  |
+|**Substance use** |         |                   |
 |    | smoke100 |smoked at least 100 cigarettes  |
 |    | smokday2 |freq. of days now smoking  |
 |    | usenow3  |use of smokeless tobacco products  |
