@@ -11,6 +11,7 @@ We were interested in predicting asthma in adults based on demographic descripto
 ### Table 1. Predictors Initially Considered in our Analyses
 
 The response variables in our analyses are italicized
+
 |                |   coded variable   |      explanation        |
 |----------------|--------------------|-------------------------|
 |**Demographics**|                    |                         |
